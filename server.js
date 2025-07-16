@@ -7,8 +7,8 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 // ✅ Serve Google verification file from root folder
-app.use(express.static(".")); // root folder (for .html file like google verification)
-app.use(express.static("omegle-clone")); // frontend files (index.html etc.)
+app.use(express.static(".")); // For google verification
+app.use(express.static("omegle-clone")); // Frontend files
 
 let waiting = null;
 
@@ -51,6 +51,8 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(3000, () => {
-  console.log("✅ Server running on port 3000");
+// ✅ FIX: Render-compatible dynamic port
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`✅ Server running on port ${PORT}`);
 });
