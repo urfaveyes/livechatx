@@ -1,114 +1,187 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>LiveChatX - Talk to Strangers</title>
+  <meta charset="UTF-8">
+  <title>LiveChatX</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      background: linear-gradient(to right, #000428, #004e92);
-      font-family: sans-serif;
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #111;
+      color: white;
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
-      color: white;
-      height: 100vh;
-      margin: 0;
+      padding: 20px;
     }
+
+    h1 { margin-bottom: 10px; font-size: 2rem; }
+
+    #online-users {
+      margin-bottom: 15px;
+      font-size: 1.2rem;
+      color: #0f0;
+    }
+
+    #videos {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 15px;
+    }
+
     video {
       width: 300px;
-      height: 230px;
+      max-width: 90vw;
+      height: 220px;
       background: black;
+      border: 2px solid #666;
       border-radius: 10px;
-      margin: 10px;
     }
+
+    #controls {
+      margin-bottom: 10px;
+    }
+
     button {
-      padding: 10px 20px;
-      margin: 10px;
-      font-size: 16px;
-      border-radius: 6px;
+      margin: 5px;
+      padding: 10px 15px;
+      background: #0e76f9;
       border: none;
-      background: #00c6ff;
       color: white;
+      border-radius: 8px;
       cursor: pointer;
+      font-size: 1rem;
+      transition: 0.3s;
+    }
+
+    button:hover {
+      background: #095ecf;
+    }
+
+    #chat {
+      width: 100%;
+      max-width: 600px;
+      margin-top: 10px;
+      background: #222;
+      padding: 10px;
+      border-radius: 10px;
+    }
+
+    #messages {
+      height: 150px;
+      overflow-y: auto;
+      border-bottom: 1px solid #555;
+      margin-bottom: 10px;
+      padding: 5px;
+    }
+
+    #chat-input {
+      display: flex;
+    }
+
+    #chat-input input {
+      flex: 1;
+      padding: 10px;
+      font-size: 1rem;
+      border: none;
+      border-radius: 5px 0 0 5px;
+    }
+
+    #chat-input button {
+      border-radius: 0 5px 5px 0;
     }
   </style>
 </head>
 <body>
+
   <h1>LiveChatX</h1>
-  <p>Random video chat with strangers</p>
+  <div id="online-users">Users online: 0</div>
 
   <div id="videos">
-    <video id="localVideo" autoplay muted></video>
-    <video id="remoteVideo" autoplay></video>
+    <video id="localVideo" autoplay muted playsinline></video>
+    <video id="remoteVideo" autoplay playsinline></video>
   </div>
 
-  <button onclick="startChat()">Start Chat</button>
+  <div id="controls">
+    <button id="startBtn">Start</button>
+    <button id="switchBtn">Switch</button>
+  </div>
 
-  <script src="/socket.io/socket.io.js"></script>
+  <div id="chat">
+    <div id="messages"></div>
+    <div id="chat-input">
+      <input type="text" id="messageInput" placeholder="Type a message...">
+      <button id="sendBtn">Send</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
   <script>
     const socket = io();
-    const localVideo = document.getElementById('localVideo');
-    const remoteVideo = document.getElementById('remoteVideo');
 
-    let peerConnection;
-    let stream;
+    const localVideo = document.getElementById("localVideo");
+    const remoteVideo = document.getElementById("remoteVideo");
+    const startBtn = document.getElementById("startBtn");
+    const switchBtn = document.getElementById("switchBtn");
+    const messagesDiv = document.getElementById("messages");
+    const messageInput = document.getElementById("messageInput");
+    const sendBtn = document.getElementById("sendBtn");
+    const onlineUsers = document.getElementById("online-users");
 
-    const config = {
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-    };
+    let pc;
+    let localStream;
 
-    // Step 1: Get user media on page load
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then(s => {
-        stream = s;
-        localVideo.srcObject = stream;
-      })
-      .catch(error => {
-        alert("Camera access denied. Please allow permissions.");
-        console.error(error);
-      });
-
-    // Step 2: Handle Start Chat
-    function startChat() {
-      socket.emit("join");
-
-      socket.on("ready", () => {
-        peerConnection = createPeerConnection();
-        stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
-        peerConnection.createOffer().then(offer => {
-          peerConnection.setLocalDescription(offer);
-          socket.emit("offer", offer);
-        });
-      });
-
-      socket.on("offer", offer => {
-        peerConnection = createPeerConnection();
-        peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-        stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
-        peerConnection.createAnswer().then(answer => {
-          peerConnection.setLocalDescription(answer);
-          socket.emit("answer", answer);
-        });
-      });
-
-      socket.on("answer", answer => {
-        peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-      });
-
-      socket.on("candidate", candidate => {
-        peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-      });
+    async function initMedia() {
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localVideo.srcObject = localStream;
     }
 
-    // Step 3: Create Peer Connection
+    socket.on("online-users", (count) => {
+      onlineUsers.textContent = "Users online: " + count;
+    });
+
+    socket.on("ready", async () => {
+      pc = createPeerConnection();
+
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit("offer", offer);
+    });
+
+    socket.on("offer", async (offer) => {
+      pc = createPeerConnection();
+
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+      await pc.setRemoteDescription(offer);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit("answer", answer);
+    });
+
+    socket.on("answer", (answer) => {
+      pc.setRemoteDescription(answer);
+    });
+
+    socket.on("candidate", (candidate) => {
+      if (pc) pc.addIceCandidate(candidate);
+    });
+
     function createPeerConnection() {
+      const config = {
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+        ]
+      };
+
       const pc = new RTCPeerConnection(config);
 
-      pc.onicecandidate = ({ candidate }) => {
-        if (candidate) {
-          socket.emit("candidate", candidate);
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit("candidate", event.candidate);
         }
       };
 
@@ -117,6 +190,38 @@
       };
 
       return pc;
+    }
+
+    startBtn.onclick = async () => {
+      await initMedia();
+      socket.emit("join");
+    };
+
+    switchBtn.onclick = () => {
+      if (pc) pc.close();
+      if (remoteVideo.srcObject) remoteVideo.srcObject.getTracks().forEach(t => t.stop());
+      remoteVideo.srcObject = null;
+      socket.emit("switch");
+    };
+
+    sendBtn.onclick = () => {
+      const msg = messageInput.value.trim();
+      if (msg) {
+        appendMessage("You", msg);
+        socket.emit("message", msg);
+        messageInput.value = "";
+      }
+    };
+
+    socket.on("message", (msg) => {
+      appendMessage("Stranger", msg);
+    });
+
+    function appendMessage(sender, msg) {
+      const div = document.createElement("div");
+      div.textContent = `${sender}: ${msg}`;
+      messagesDiv.appendChild(div);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
     }
   </script>
 </body>

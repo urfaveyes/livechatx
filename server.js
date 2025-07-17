@@ -1,28 +1,53 @@
-const express = require("express"); 
+const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
+const axios = require("axios");
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// ✅ Serve Google verification file from root folder
-app.use(express.static(".")); // For google verification
-app.use(express.static("omegle-clone")); // Frontend files
+app.use(express.static(".")); // for root files
+app.use(express.static("omegle-clone")); // frontend files
 
-let waiting = null;
+let users = []; // All connected sockets
 
-io.on("connection", (socket) => {
-  socket.on("join", () => {
-    if (waiting) {
-      const partner = waiting;
-      waiting = null;
-      socket.partner = partner;
-      partner.partner = socket;
-      partner.emit("ready");
+// ✅ Helper: Get user location via IP
+async function getLocation(ip) {
+  try {
+    const res = await axios.get(`https://ipapi.co/${ip}/json/`);
+    return res.data.city || res.data.country || "unknown";
+  } catch (e) {
+    return "unknown";
+  }
+}
+
+io.on("connection", async (socket) => {
+  const ip = socket.handshake.headers["x-forwarded-for"]?.split(',')[0] || socket.conn.remoteAddress;
+  const location = await getLocation(ip);
+  socket.location = location;
+  socket.isMatched = false;
+  users.push(socket);
+
+  // ✅ Send current online count to all
+  io.emit("updateOnline", users.length);
+
+  socket.on("start", () => {
+    if (socket.isMatched) return;
+    // Try to find a partner in same location
+    const potential = users.find(
+      (s) => s !== socket && !s.isMatched && s.location === socket.location
+    ) || users.find((s) => s !== socket && !s.isMatched);
+
+    if (potential) {
+      socket.isMatched = true;
+      potential.isMatched = true;
+
+      socket.partner = potential;
+      potential.partner = socket;
+
       socket.emit("ready");
-    } else {
-      waiting = socket;
+      potential.emit("ready");
     }
   });
 
@@ -38,21 +63,37 @@ io.on("connection", (socket) => {
     if (socket.partner) socket.partner.emit("candidate", candidate);
   });
 
-  socket.on("message", (msg) => {
-    if (socket.partner) socket.partner.emit("message", msg);
+  socket.on("chat", (msg) => {
+    if (socket.partner) socket.partner.emit("chat", msg);
+  });
+
+  socket.on("switch", () => {
+    if (socket.partner) {
+      socket.partner.emit("partner-left");
+      socket.partner.partner = null;
+      socket.partner.isMatched = false;
+    }
+
+    socket.partner = null;
+    socket.isMatched = false;
+    socket.emit("switched");
+
+    setTimeout(() => {
+      socket.emit("start"); // Auto restart
+    }, 1000);
   });
 
   socket.on("disconnect", () => {
+    users = users.filter((s) => s !== socket);
     if (socket.partner) {
+      socket.partner.emit("partner-left");
       socket.partner.partner = null;
-      socket.partner = null;
+      socket.partner.isMatched = false;
     }
-    if (waiting === socket) waiting = null;
+    io.emit("updateOnline", users.length);
   });
 });
 
-// ✅ FIX: Render-compatible dynamic port
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
+server.listen(3000, () => {
+  console.log("✅ Server running on port 3000");
 });
